@@ -152,23 +152,11 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
   const fetchAIRecommendations = async (transactions: Transaction[], budgetLimits: BudgetLimit[]): Promise<AIRecommendation[]> => {
     if (!user) throw new Error('User not authenticated')
 
-    let openaiApiKey = null
-
-    if (isPro) {
-      // For Pro users, we don't need to fetch their API key
-      // The edge function will handle this differently for Pro users
-    } else {
-      // Get user's OpenAI API key for non-Pro users
-      const { data: profileData, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('openai_api_key')
-        .eq('user_id', user.id)
-        .single()
-
-      if (profileError || !profileData?.openai_api_key) {
-        throw new Error('OpenAI API key not found')
-      }
-      openaiApiKey = profileData.openai_api_key
+    // Use the edge function which will handle Pro vs non-Pro logic
+    const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-insights`
+    const headers = {
+      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
     }
 
     // Prepare transaction summary for AI
@@ -177,97 +165,25 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
     // Get economic trends (simplified - in production you'd use a real economic API)
     const economicContext = await getEconomicContext()
 
-    const systemPrompt = `You are an expert financial advisor with deep knowledge of personal finance, economic trends, and behavioral economics. Analyze the provided financial data and generate personalized recommendations.
-
-Consider:
-1. Current spending patterns and trends
-2. Budget adherence and overspending areas
-3. Economic context and future trends
-4. Behavioral finance principles
-5. Risk management and emergency planning
-6. Investment and savings optimization
-
-Respond with a JSON array of recommendation objects, each containing:
-- type: category of recommendation
-- title: clear, actionable title
-- description: detailed explanation with specific insights
-- impact: "high", "medium", or "low"
-- savings: estimated monthly savings potential (number)
-- actionItems: array of 2-3 specific action steps
-- economicContext: how current economic trends affect this recommendation
-- confidence: confidence score 0-1
-
-Focus on:
-- Actionable, specific advice
-- Economic trend integration
-- Behavioral insights
-- Risk mitigation
-- Long-term financial health
-
-Maximum 5 recommendations, prioritize by impact and relevance.`
-
-    const userPrompt = `Analyze my financial data and provide personalized recommendations:
-
-TRANSACTION SUMMARY:
-${transactionSummary}
-
-ECONOMIC CONTEXT:
-${economicContext}
-
-Please provide detailed, actionable financial recommendations based on this data, current economic trends, and best practices for personal finance management.`
-
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-        }),
+          userId: user.id,
+          transactionSummary,
+          economicContext,
+          isPro
+        })
       })
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(`OpenAI API error: ${errorData.error?.message || 'Unknown error'}`)
+        throw new Error(errorData.error || 'Failed to generate AI recommendations')
       }
 
       const result = await response.json()
-      const content = result.choices[0]?.message?.content
-
-      if (!content) {
-        throw new Error('No response from OpenAI')
-      }
-
-      // Strip markdown code block delimiters if present
-      let cleanContent = content.trim()
-      if (cleanContent.startsWith('```json')) {
-        cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '')
-      } else if (cleanContent.startsWith('```')) {
-        cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '')
-      }
-
-      // Parse the JSON response
-      const recommendations = JSON.parse(cleanContent)
-      
-      // Validate and format recommendations
-      return recommendations.map((rec: any) => ({
-        type: rec.type || 'general',
-        title: rec.title || 'Financial Recommendation',
-        description: rec.description || '',
-        impact: rec.impact || 'medium',
-        savings: rec.savings || 0,
-        actionItems: rec.actionItems || [],
-        economicContext: rec.economicContext || '',
-        confidence: rec.confidence || 0.8
-      }))
+      return result.recommendations || []
 
     } catch (error) {
       console.error('AI recommendation generation failed:', error)
