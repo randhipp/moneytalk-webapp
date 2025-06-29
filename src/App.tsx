@@ -49,17 +49,15 @@ function AppContent() {
     )
   }
 
-  if (!user) {
-    return <Auth />
-  }
-
   return (
     <Routes>
       <Route path="/success" element={<SuccessPage />} />
       <Route path="/" element={
-        <Layout>
-          <Dashboard />
-        </Layout>
+        !user ? <Auth /> : (
+          <Layout>
+            <Dashboard />
+          </Layout>
+        )
       } />
     </Routes>
   )
