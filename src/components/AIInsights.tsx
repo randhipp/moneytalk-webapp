@@ -40,7 +40,6 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
     patterns: []
   })
   const [aiRecommendations, setAiRecommendations] = useState<AIRecommendation[]>([])
-  const [cachedAIRecommendations, setCachedAIRecommendations] = useState<CachedAIRecommendations | null>(null)
   const [isRefreshingAI, setIsRefreshingAI] = useState(false)
   const [lastAIRefresh, setLastAIRefresh] = useState<Date | null>(null)
   const [budgetLimits, setBudgetLimits] = useState<BudgetLimit[]>([])
@@ -53,6 +52,13 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
       loadBudgetLimits()
     }
   }, [user, budgetLimitsVersion])
+
+  // Load cached AI recommendations from database
+  useEffect(() => {
+    if (user) {
+      loadCachedAIRecommendations()
+    }
+  }, [user])
 
   const loadBudgetLimits = async () => {
     if (!user) return
@@ -72,38 +78,49 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
     }
   }
 
+  const loadCachedAIRecommendations = async () => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase
+        .from('ai_recommendations_cache')
+        .select('recommendations, created_at')
+        .eq('user_id', user.id)
+        .single()
+
+      if (error) {
+        // No cache found, that's okay
+        if (error.code !== 'PGRST116') {
+          console.error('Error loading AI recommendations cache:', error)
+        }
+        return
+      }
+
+      if (data) {
+        const cacheAge = Date.now() - new Date(data.created_at).getTime()
+        const cacheValidDuration = 7 * 24 * 60 * 60 * 1000 // 1 week
+
+        if (cacheAge < cacheValidDuration) {
+          setAiRecommendations(data.recommendations)
+          setLastAIRefresh(new Date(data.created_at))
+        } else {
+          // Cache is expired, delete it
+          await supabase
+            .from('ai_recommendations_cache')
+            .delete()
+            .eq('user_id', user.id)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading cached AI recommendations:', error)
+    }
+  }
+
   // Generate basic insights whenever transactions or budget limits change
   useEffect(() => {
     const insights = generateBasicInsights(transactions, budgetLimits)
     setBasicInsights(insights)
   }, [transactions, budgetLimits])
-
-  // Load cached AI recommendations on component mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('ai-recommendations-cache')
-      if (stored) {
-        const parsedCache: CachedAIRecommendations = JSON.parse(stored)
-        const now = Date.now()
-        const cacheValidDuration = 7 * 24 * 60 * 60 * 1000 // 1 week
-
-        // Only check time-based expiration, not data changes
-        if ((now - parsedCache.timestamp) < cacheValidDuration) {
-          setCachedAIRecommendations(parsedCache)
-          setAiRecommendations(parsedCache.data)
-          setLastAIRefresh(new Date(parsedCache.timestamp))
-        } else {
-          // Cache is expired, clear it but don't auto-generate
-          setCachedAIRecommendations(null)
-          setAiRecommendations([])
-          setLastAIRefresh(null)
-          localStorage.removeItem('ai-recommendations-cache')
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to load cached AI recommendations:', error)
-    }
-  }, []) // Only run on component mount, not when data changes
 
   const generateAIRecommendations = async () => {
     if (transactions.length === 0) return
@@ -114,23 +131,11 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
     try {
       const recommendations = await fetchAIRecommendations(transactions, budgetLimits)
       
-      const now = Date.now()
-      const newCachedRecommendations: CachedAIRecommendations = {
-        data: recommendations,
-        timestamp: now
-      }
-
-      // Update states
-      setCachedAIRecommendations(newCachedRecommendations)
+      // Save to database cache
+      await saveCacheToDatabase(recommendations)
+      
       setAiRecommendations(recommendations)
       setLastAIRefresh(new Date())
-
-      // Store in localStorage for persistence
-      try {
-        localStorage.setItem('ai-recommendations-cache', JSON.stringify(newCachedRecommendations))
-      } catch (error) {
-        console.warn('Failed to cache AI recommendations in localStorage:', error)
-      }
 
     } catch (error) {
       console.error('Error generating AI recommendations:', error)
@@ -140,10 +145,39 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = fals
     }
   }
 
+  const saveCacheToDatabase = async (recommendations: AIRecommendation[]) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase
+        .from('ai_recommendations_cache')
+        .upsert({
+          user_id: user.id,
+          recommendations: recommendations
+        }, {
+          onConflict: 'user_id'
+        })
+
+      if (error) {
+        console.error('Error saving AI recommendations cache:', error)
+      }
+    } catch (error) {
+      console.error('Error saving AI recommendations cache:', error)
+    }
+  }
+
   const handleManualRefresh = async () => {
-    // Clear cache to force regeneration
-    localStorage.removeItem('ai-recommendations-cache')
-    setCachedAIRecommendations(null)
+    // Clear database cache to force regeneration
+    if (user) {
+      try {
+        await supabase
+          .from('ai_recommendations_cache')
+          .delete()
+          .eq('user_id', user.id)
+      } catch (error) {
+        console.error('Error clearing cache:', error)
+      }
+    }
     
     // Generate new recommendations
     await generateAIRecommendations()
@@ -309,17 +343,17 @@ KEY CONSIDERATIONS:
   }
 
   const isCacheValid = () => {
-    if (!cachedAIRecommendations) return false
+    if (!lastAIRefresh) return false
     const now = Date.now()
     const cacheValidDuration = 7 * 24 * 60 * 60 * 1000 // 1 week
-    return (now - cachedAIRecommendations.timestamp) < cacheValidDuration
+    return (now - lastAIRefresh.getTime()) < cacheValidDuration
   }
 
   const getCacheTimeRemaining = () => {
-    if (!cachedAIRecommendations) return null
+    if (!lastAIRefresh) return null
     const now = Date.now()
     const cacheValidDuration = 7 * 24 * 60 * 60 * 1000 // 1 week
-    const timeRemaining = cacheValidDuration - (now - cachedAIRecommendations.timestamp)
+    const timeRemaining = cacheValidDuration - (now - lastAIRefresh.getTime())
     
     if (timeRemaining <= 0) return null
     
