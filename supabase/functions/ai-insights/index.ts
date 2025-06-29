@@ -83,8 +83,8 @@ async function getOpenAIApiKey(userId: string): Promise<{ openaiApiKey: string |
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     
-    // Check if user has an active Pro subscription by filtering by user_id
-    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_user_subscriptions?select=subscription_status&customer_id=in.(select customer_id from stripe_customers where user_id=eq.${userId})`, {
+    // First check if user has an active Pro subscription
+    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_customers?select=customer_id&user_id=eq.${userId}`, {
       headers: {
         'Authorization': `Bearer ${supabaseServiceKey}`,
         'apikey': supabaseServiceKey,
@@ -94,8 +94,25 @@ async function getOpenAIApiKey(userId: string): Promise<{ openaiApiKey: string |
 
     let hasActivePro = false
     if (subscriptionResponse.ok) {
-      const subscriptionData = await subscriptionResponse.json()
-      hasActivePro = subscriptionData.length > 0 && subscriptionData[0]?.subscription_status === 'active'
+      const customerData = await subscriptionResponse.json()
+      
+      if (customerData.length > 0) {
+        const customerId = customerData[0].customer_id
+        
+        // Check subscription status for this customer
+        const subResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_subscriptions?select=status&customer_id=eq.${customerId}&deleted_at=is.null`, {
+          headers: {
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+            'apikey': supabaseServiceKey,
+            'Content-Type': 'application/json',
+          },
+        })
+        
+        if (subResponse.ok) {
+          const subData = await subResponse.json()
+          hasActivePro = subData.length > 0 && subData[0]?.status === 'active'
+        }
+      }
     }
 
     if (hasActivePro) {
