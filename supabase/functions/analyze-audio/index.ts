@@ -106,40 +106,42 @@ async function getOpenAIApiKey(userId: string): Promise<{ openaiApiKey: string |
       },
     })
 
+    let hasActivePro = false
     if (subscriptionResponse.ok) {
       const subscriptionData = await subscriptionResponse.json()
-      const hasActivePro = subscriptionData.length > 0 && subscriptionData[0]?.subscription_status === 'active'
-      
-      if (hasActivePro) {
-        // User has Pro subscription, use the Supabase environment variable
-        const proApiKey = Deno.env.get('OPENAI_API_KEY')
-        if (proApiKey) {
-          return { openaiApiKey: proApiKey, isPro: true }
-        }
+      hasActivePro = subscriptionData.length > 0 && subscriptionData[0]?.subscription_status === 'active'
+    }
+
+    if (hasActivePro) {
+      // User has Pro subscription, use the server-side environment variable
+      const proApiKey = Deno.env.get('OPENAI_API_KEY')
+      if (!proApiKey) {
+        throw new Error('Server configuration error: OpenAI API key not configured for Pro users')
       }
+      return { openaiApiKey: proApiKey, isPro: true }
+    } else {
+      // User doesn't have Pro subscription, get their personal API key
+      const profileResponse = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=openai_api_key`, {
+        headers: {
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'apikey': supabaseServiceKey,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!profileResponse.ok) {
+        throw new Error('Failed to fetch user profile')
+      }
+
+      const profileData = await profileResponse.json()
+      const userApiKey = profileData[0]?.openai_api_key || null
+
+      return { openaiApiKey: userApiKey, isPro: false }
     }
-
-    // User doesn't have Pro or Pro API key not available, get their personal API key
-    const profileResponse = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=openai_api_key`, {
-      headers: {
-        'Authorization': `Bearer ${supabaseServiceKey}`,
-        'apikey': supabaseServiceKey,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!profileResponse.ok) {
-      throw new Error('Failed to fetch user profile')
-    }
-
-    const profileData = await profileResponse.json()
-    const userApiKey = profileData[0]?.openai_api_key || null
-
-    return { openaiApiKey: userApiKey, isPro: false }
 
   } catch (error) {
     console.error('Error fetching OpenAI API key:', error)
-    return { openaiApiKey: null, isPro: false }
+    throw error
   }
 }
 
