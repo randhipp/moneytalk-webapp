@@ -101,7 +101,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
-      await supabase.auth.signOut()
+      const { error } = await supabase.auth.signOut()
+      
+      if (error) {
+        // Check if the error is due to session not existing (user already logged out)
+        if (error.message && error.message.includes('Session from session_id claim in JWT does not exist')) {
+          console.warn('User session already expired or invalid, treating as successful logout')
+          // Clear local state since user is effectively logged out
+          setSession(null)
+          setUser(null)
+          return
+        }
+        // For other errors, log them but don't throw
+        console.error('Error signing out:', error)
+      }
     } catch (error) {
       console.error('Error signing out:', error)
     }
