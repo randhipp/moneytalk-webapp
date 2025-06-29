@@ -97,8 +97,8 @@ async function getOpenAIApiKey(userId: string): Promise<{ openaiApiKey: string |
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     
-    // First check if user has an active Pro subscription
-    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_user_subscriptions?select=subscription_status`, {
+    // First check if user has an active Pro subscription by filtering by user_id
+    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_user_subscriptions?select=subscription_status&customer_id=in.(select customer_id from stripe_customers where user_id=eq.${userId})`, {
       headers: {
         'Authorization': `Bearer ${supabaseServiceKey}`,
         'apikey': supabaseServiceKey,
