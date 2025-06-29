@@ -130,10 +130,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return
       }
 
-      setSession(null)
-        setUser(null)
-      
       console.error('Error signing out:', caughtError)
+      setSession(null)
+      setUser(null)
+      return
     }
   }
 
