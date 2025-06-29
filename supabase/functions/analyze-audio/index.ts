@@ -45,11 +45,11 @@ Deno.serve(async (req: Request) => {
       throw new Error('User ID is required')
     }
 
-    // Get user's OpenAI API key from database
-    const openaiApiKey = await getUserOpenAIKey(userId)
+    // Check if user has Pro subscription and get appropriate API key
+    const { openaiApiKey, isPro } = await getOpenAIApiKey(userId)
     
     if (!openaiApiKey) {
-      throw new Error('OpenAI API key not found for user')
+      throw new Error('OpenAI API key not available. Please upgrade to Pro or add your own API key.')
     }
 
     let finalTranscript = transcript
@@ -91,13 +91,14 @@ Deno.serve(async (req: Request) => {
   }
 })
 
-async function getUserOpenAIKey(userId: string): Promise<string | null> {
+async function getOpenAIApiKey(userId: string): Promise<{ openaiApiKey: string | null, isPro: boolean }> {
   try {
     // Create Supabase client with service role key
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     
-    const response = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=openai_api_key`, {
+    // First check if user has an active Pro subscription
+    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/stripe_user_subscriptions?select=subscription_status`, {
       headers: {
         'Authorization': `Bearer ${supabaseServiceKey}`,
         'apikey': supabaseServiceKey,
@@ -105,16 +106,40 @@ async function getUserOpenAIKey(userId: string): Promise<string | null> {
       },
     })
 
-    if (!response.ok) {
+    if (subscriptionResponse.ok) {
+      const subscriptionData = await subscriptionResponse.json()
+      const hasActivePro = subscriptionData.length > 0 && subscriptionData[0]?.subscription_status === 'active'
+      
+      if (hasActivePro) {
+        // User has Pro subscription, use the Supabase environment variable
+        const proApiKey = Deno.env.get('OPENAI_API_KEY')
+        if (proApiKey) {
+          return { openaiApiKey: proApiKey, isPro: true }
+        }
+      }
+    }
+
+    // User doesn't have Pro or Pro API key not available, get their personal API key
+    const profileResponse = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=openai_api_key`, {
+      headers: {
+        'Authorization': `Bearer ${supabaseServiceKey}`,
+        'apikey': supabaseServiceKey,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!profileResponse.ok) {
       throw new Error('Failed to fetch user profile')
     }
 
-    const data = await response.json()
-    return data[0]?.openai_api_key || null
+    const profileData = await profileResponse.json()
+    const userApiKey = profileData[0]?.openai_api_key || null
+
+    return { openaiApiKey: userApiKey, isPro: false }
 
   } catch (error) {
-    console.error('Error fetching user OpenAI key:', error)
-    return null
+    console.error('Error fetching OpenAI API key:', error)
+    return { openaiApiKey: null, isPro: false }
   }
 }
 
