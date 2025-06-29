@@ -115,12 +115,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // For other errors, log them but don't throw
         console.error('Error signing out:', error)
       }
-    } catch (error: any) {
+    } catch (caughtError: any) {
+      // Convert error to string for robust error message checking
+      const errorMessage = String(caughtError?.message || caughtError)
+      
       // Handle specific auth session missing errors
-      if (error?.message && (
-        error.message.includes('Auth session missing!') ||
-        error.message.includes('Session from session_id claim in JWT does not exist')
-      )) {
+      if (errorMessage.includes('Auth session missing!') ||
+          errorMessage.includes('Session from session_id claim in JWT does not exist') ||
+          errorMessage.includes('session_not_found')) {
         console.warn('Auth session already missing, treating as successful logout')
         // Clear local state since user is effectively logged out
         setSession(null)
@@ -128,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return
       }
       
-      console.error('Error signing out:', error)
+      console.error('Error signing out:', caughtError)
     }
   }
 
