@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react'
-import { Mic, MicOff, Play, Square, Save, X, Loader } from 'lucide-react'
+import { Mic, MicOff, Play, Square, Save, X, Loader, Crown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Transaction } from './Dashboard'
 
 interface TransactionRecorderProps {
   onTransactionAdded: (transaction: Transaction) => void
+  isPro?: boolean
 }
 
 const CATEGORIES = [
@@ -13,7 +14,7 @@ const CATEGORIES = [
   'Food', 'Drinks', 'Travel', 'Loans', 'Education', 'Kids', 'Family'
 ]
 
-export function TransactionRecorder({ onTransactionAdded }: TransactionRecorderProps) {
+export function TransactionRecorder({ onTransactionAdded, isPro = false }: TransactionRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [audioURL, setAudioURL] = useState<string | null>(null)
   const [transcript, setTranscript] = useState('')
@@ -209,6 +210,12 @@ export function TransactionRecorder({ onTransactionAdded }: TransactionRecorderP
       <div className="text-center">
         <h3 className="text-xl font-bold text-gray-900 mb-2">Record Transaction</h3>
         <p className="text-gray-600">Record your transaction with voice or add manually</p>
+        {isPro && (
+          <div className="flex items-center justify-center space-x-2 mt-2">
+            <Crown className="w-4 h-4 text-yellow-500" />
+            <span className="text-sm text-yellow-600 font-medium">Pro features enabled</span>
+          </div>
+        )}
       </div>
 
       {error && (

@@ -1,9 +1,10 @@
 import React from 'react'
-import { BrowserRouter as Router } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Layout } from './components/Layout'
 import { Auth } from './components/Auth'
 import { Dashboard } from './components/Dashboard'
+import { SuccessPage } from './components/SuccessPage'
 
 function AppContent() {
   const { user, loading } = useAuth()
@@ -53,9 +54,14 @@ function AppContent() {
   }
 
   return (
-    <Layout>
-      <Dashboard />
-    </Layout>
+    <Routes>
+      <Route path="/success" element={<SuccessPage />} />
+      <Route path="/" element={
+        <Layout>
+          <Dashboard />
+        </Layout>
+      } />
+    </Routes>
   )
 }
 

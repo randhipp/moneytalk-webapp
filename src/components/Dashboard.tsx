@@ -8,9 +8,10 @@ import { OpenAIKeySetup } from './OpenAIKeySetup'
 import { DummyDataGenerator } from './DummyDataGenerator'
 import { DataManagement } from './DataManagement'
 import { BudgetLimitsManager } from './BudgetLimitsManager'
+import { PricingPage } from './PricingPage'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Mic, List, BarChart3, Download, Brain, Plus, RefreshCw, Settings } from 'lucide-react'
+import { Mic, List, BarChart3, Download, Brain, Plus, RefreshCw, Settings, Crown } from 'lucide-react'
 
 export interface Transaction {
   id: string
@@ -32,39 +33,53 @@ export function Dashboard() {
   const [checkingApiKey, setCheckingApiKey] = useState(true)
   const [showDummyDataGenerator, setShowDummyDataGenerator] = useState(false)
   const [budgetLimitsVersion, setBudgetLimitsVersion] = useState(0)
+  const [subscription, setSubscription] = useState<any>(null)
+  const [showPricing, setShowPricing] = useState(false)
   const { user } = useAuth()
 
   useEffect(() => {
     if (user) {
-      checkOpenAIKey()
+      checkSubscriptionAndApiKey()
     }
   }, [user])
 
   useEffect(() => {
-    if (hasOpenAIKey) {
+    if (hasOpenAIKey || (subscription && subscription.subscription_status === 'active')) {
       fetchTransactions()
     }
-  }, [hasOpenAIKey, user])
+  }, [hasOpenAIKey, subscription, user])
 
-  const checkOpenAIKey = async () => {
+  const checkSubscriptionAndApiKey = async () => {
     if (!user) return
 
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('openai_api_key')
-        .eq('user_id', user.id)
-        .single()
+      // Check subscription status
+      const { data: subData, error: subError } = await supabase
+        .from('stripe_user_subscriptions')
+        .select('subscription_status, price_id')
+        .maybeSingle()
 
-      if (error) {
-        console.error('Error checking API key:', error)
-        setHasOpenAIKey(false)
+      if (!subError && subData) {
+        setSubscription(subData)
+      }
+
+      // Check OpenAI API key only if not subscribed to Pro
+      if (!subData || subData.subscription_status !== 'active') {
+        const { data: profileData, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('openai_api_key')
+          .eq('user_id', user.id)
+          .single()
+
+        if (!profileError && profileData?.openai_api_key) {
+          setHasOpenAIKey(true)
+        }
       } else {
-        setHasOpenAIKey(!!data?.openai_api_key)
+        // Pro subscription means no need for API key
+        setHasOpenAIKey(true)
       }
     } catch (error) {
-      console.error('Error checking API key:', error)
-      setHasOpenAIKey(false)
+      console.error('Error checking subscription and API key:', error)
     } finally {
       setCheckingApiKey(false)
     }
@@ -152,8 +167,12 @@ export function Dashboard() {
     )
   }
 
-  if (!hasOpenAIKey) {
-    return <OpenAIKeySetup onKeySet={handleApiKeySet} />
+  // Show pricing page if no subscription and no API key
+  if (!hasOpenAIKey && (!subscription || subscription.subscription_status !== 'active')) {
+    if (showPricing) {
+      return <PricingPage onClose={() => setShowPricing(false)} />
+    }
+    return <OpenAIKeySetup onKeySet={handleApiKeySet} onShowPricing={() => setShowPricing(true)} />
   }
 
   if (showDummyDataGenerator) {
@@ -177,8 +196,18 @@ export function Dashboard() {
     <div className="space-y-6">
       {/* Welcome Section */}
       <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl text-white p-6">
-        <h2 className="text-2xl font-bold mb-2">Welcome back!</h2>
-        <p className="text-blue-100">Track your finances with AI-powered insights</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold mb-2">Welcome back!</h2>
+            <p className="text-blue-100">Track your finances with AI-powered insights</p>
+          </div>
+          {subscription && subscription.subscription_status === 'active' && (
+            <div className="flex items-center space-x-2 bg-white/20 rounded-lg px-3 py-2">
+              <Crown className="w-5 h-5 text-yellow-300" />
+              <span className="text-white font-medium">Pro</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -258,7 +287,10 @@ export function Dashboard() {
 
         <div className="p-6">
           {activeTab === 'record' && (
-            <TransactionRecorder onTransactionAdded={addTransaction} />
+            <TransactionRecorder 
+              onTransactionAdded={addTransaction} 
+              isPro={subscription && subscription.subscription_status === 'active'}
+            />
           )}
           {activeTab === 'transactions' && (
             <TransactionList
@@ -274,6 +306,7 @@ export function Dashboard() {
             <AIInsights 
               transactions={transactions} 
               budgetLimitsVersion={budgetLimitsVersion}
+              isPro={subscription && subscription.subscription_status === 'active'}
             />
           )}
           {activeTab === 'budget' && (

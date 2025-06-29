@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import { Transaction } from './Dashboard'
-import { Brain, TrendingUp, TrendingDown, AlertTriangle, Target, Lightbulb, RefreshCw, Sparkles } from 'lucide-react'
+import { Brain, TrendingUp, TrendingDown, AlertTriangle, Target, Lightbulb, RefreshCw, Sparkles, Crown } from 'lucide-react'
 import { startOfWeek, endOfWeek, subWeeks, isWithinInterval, format } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext'
 interface AIInsightsProps {
   transactions: Transaction[]
   budgetLimitsVersion?: number
+  isPro?: boolean
 }
 
 interface CachedAIRecommendations {
@@ -31,7 +32,7 @@ interface AIRecommendation {
   confidence: number
 }
 
-export function AIInsights({ transactions, budgetLimitsVersion = 0 }: AIInsightsProps) {
+export function AIInsights({ transactions, budgetLimitsVersion = 0, isPro = false }: AIInsightsProps) {
   const [basicInsights, setBasicInsights] = useState({
     spendingTrends: [],
     recommendations: [],
@@ -151,15 +152,23 @@ export function AIInsights({ transactions, budgetLimitsVersion = 0 }: AIInsights
   const fetchAIRecommendations = async (transactions: Transaction[], budgetLimits: BudgetLimit[]): Promise<AIRecommendation[]> => {
     if (!user) throw new Error('User not authenticated')
 
-    // Get user's OpenAI API key
-    const { data: profileData, error: profileError } = await supabase
-      .from('user_profiles')
-      .select('openai_api_key')
-      .eq('user_id', user.id)
-      .single()
+    let openaiApiKey = null
 
-    if (profileError || !profileData?.openai_api_key) {
-      throw new Error('OpenAI API key not found')
+    if (isPro) {
+      // For Pro users, we don't need to fetch their API key
+      // The edge function will handle this differently for Pro users
+    } else {
+      // Get user's OpenAI API key for non-Pro users
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('openai_api_key')
+        .eq('user_id', user.id)
+        .single()
+
+      if (profileError || !profileData?.openai_api_key) {
+        throw new Error('OpenAI API key not found')
+      }
+      openaiApiKey = profileData.openai_api_key
     }
 
     // Prepare transaction summary for AI
@@ -211,7 +220,7 @@ Please provide detailed, actionable financial recommendations based on this data
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${profileData.openai_api_key}`,
+          'Authorization': `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -421,6 +430,12 @@ KEY CONSIDERATIONS:
             <Brain className="w-5 h-5 text-purple-600" />
           </div>
           <h3 className="text-xl font-bold text-gray-900">AI Financial Insights</h3>
+          {isPro && (
+            <div className="flex items-center space-x-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
+              <Crown className="w-3 h-3" />
+              <span>Pro</span>
+            </div>
+          )}
         </div>
       </div>
 

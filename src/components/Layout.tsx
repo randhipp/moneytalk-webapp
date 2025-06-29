@@ -1,6 +1,7 @@
 import React from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, DollarSign, User, Download } from 'lucide-react'
+import { LogOut, DollarSign, User, Crown } from 'lucide-react'
+import { SubscriptionStatus } from './SubscriptionStatus'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -26,6 +27,9 @@ export function Layout({ children }: LayoutProps) {
 
             {user && (
               <div className="flex items-center space-x-4">
+                {/* Subscription Status */}
+                <SubscriptionStatus />
+                
                 {/* Bolt Icon */}
                 <button
                   onClick={() => window.open('https://bolt.new', '_blank')}
