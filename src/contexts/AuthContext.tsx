@@ -129,6 +129,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null)
         return
       }
+
+      setSession(null)
+        setUser(null)
       
       console.error('Error signing out:', caughtError)
     }
